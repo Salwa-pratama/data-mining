@@ -1,0 +1,295 @@
+# CELL 2
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
+
+from sklearn.svm import SVR
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    f1_score, precision_score, recall_score,
+    accuracy_score, confusion_matrix, classification_report
+)
+
+print('Libraries imported successfully!')
+
+# CELL 3
+import preprocessing2
+print(preprocessing2.__file__)  # liat dia load dari mana
+
+# CELL 4
+import traceback
+try:
+    import importlib
+    import preprocessing2
+    importlib.reload(preprocessing2)
+except Exception as e:
+    traceback.print_exc()
+
+# CELL 6
+from preprocessing2 import (
+    # Z-Score
+    df_zscore,
+    df_zscore_drop,
+    df_zscore_replace,
+
+    # Log Transform
+    df_log,
+    df_log_drop,
+    df_log_replace,
+
+    # MinMax
+    df_minmax,
+    df_minmax_drop,
+    df_minmax_replace,
+
+    # Decimal Scaling
+    df_decimal,
+    df_decimal_drop,
+    df_decimal_replace,
+)
+
+print('Semua dataset berhasil diimport!')
+
+# CELL 8
+def run_svr(df, dataset_name, test_size=0.2, random_state=42):
+    """
+    Melatih SVR pada dataset dan mengembalikan hasil evaluasi.
+
+    Parameters:
+        df           : DataFrame yang sudah di-encode dan di-transform
+        dataset_name : Nama dataset (untuk label di output)
+        test_size    : Proporsi data test (default 0.2 = 20%)
+        random_state : Random seed
+
+    Returns:
+        dict berisi semua metrik evaluasi
+    """
+    df_clean = df.copy()
+
+    # Drop kolom non-numerik (Loan_ID)
+    if 'Loan_ID' in df_clean.columns:
+        df_clean = df_clean.drop(columns=['Loan_ID'])
+
+    # Pisah fitur dan target
+    X = df_clean.drop(columns=['Loan_Status'])
+    y = df_clean['Loan_Status']
+
+    # Split 80/20
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=random_state, stratify=y
+    )
+
+    # Training SVR
+    svr = SVR(kernel='rbf', C=1.0, epsilon=0.1)
+    svr.fit(X_train, y_train)
+
+    # Prediksi → threshold 0.5
+    y_pred_raw  = svr.predict(X_test)
+    y_pred      = (y_pred_raw >= 0.5).astype(int)
+
+    # Metrik
+    acc       = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, zero_division=0)
+    recall    = recall_score(y_test, y_pred, zero_division=0)
+    f1        = f1_score(y_test, y_pred, zero_division=0)
+    cm        = confusion_matrix(y_test, y_pred)
+
+    return {
+        'Dataset'   : dataset_name,
+        'Accuracy'  : round(acc, 4),
+        'Precision' : round(precision, 4),
+        'Recall'    : round(recall, 4),
+        'F1 Score'  : round(f1, 4),
+        'y_test'    : y_test,
+        'y_pred'    : y_pred,
+        'cm'        : cm,
+        'model'     : svr,
+        'X_train'   : X_train,
+        'X_test'    : X_test,
+        'columns'   : X.columns.tolist(),
+    }
+
+print('Fungsi SVR siap digunakan!')
+
+# CELL 10
+datasets = {
+    # Z-Score
+    'ZScore (Original)'  : df_zscore,
+    'ZScore (Drop)'      : df_zscore_drop,
+    'ZScore (Replace)'   : df_zscore_replace,
+
+    # Log Transform
+    'Log (Original)'     : df_log,
+    'Log (Drop)'         : df_log_drop,
+    'Log (Replace)'      : df_log_replace,
+
+    # MinMax
+    'MinMax (Original)'  : df_minmax,
+    'MinMax (Drop)'      : df_minmax_drop,
+    'MinMax (Replace)'   : df_minmax_replace,
+
+    # Decimal Scaling
+    'Decimal (Original)' : df_decimal,
+    'Decimal (Drop)'     : df_decimal_drop,
+    'Decimal (Replace)'  : df_decimal_replace,
+}
+
+results = {}
+for name, df_data in datasets.items():
+    print(f'Training SVR: {name} ...')
+    results[name] = run_svr(df_data, name)
+
+print('\nSemua model selesai ditraining!')
+
+# CELL 12
+summary = pd.DataFrame([
+    {
+        'Dataset'   : r['Dataset'],
+        'Accuracy'  : r['Accuracy'],
+        'Precision' : r['Precision'],
+        'Recall'    : r['Recall'],
+        'F1 Score'  : r['F1 Score'],
+    }
+    for r in results.values()
+])
+
+summary = summary.sort_values('F1 Score', ascending=False).reset_index(drop=True)
+
+# Highlight nilai terbaik
+summary.style.highlight_max(
+    subset=['Accuracy', 'Precision', 'Recall', 'F1 Score'],
+    color='lightgreen'
+).highlight_min(
+    subset=['Accuracy', 'Precision', 'Recall', 'F1 Score'],
+    color='#ffcccc'
+)
+
+# CELL 14
+metrics = ['Accuracy', 'Precision', 'Recall', 'F1 Score']
+fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+fig.suptitle('Perbandingan Metrik SVR per Dataset Transformasi', fontsize=14, fontweight='bold')
+
+colors = [
+    '#4e79a7', '#4e79a7', '#4e79a7',  # ZScore - biru
+    '#f28e2b', '#f28e2b', '#f28e2b',  # Log - oranye
+    '#59a14f', '#59a14f', '#59a14f',  # MinMax - hijau
+    '#e15759', '#e15759', '#e15759',  # Decimal - merah
+]
+
+for ax, metric in zip(axes.flatten(), metrics):
+    vals = [results[name][metric] for name in datasets.keys()]
+    bars = ax.barh(list(datasets.keys()), vals, color=colors)
+    ax.set_xlim(0, 1.05)
+    ax.set_title(metric, fontweight='bold')
+    ax.set_xlabel('Score')
+    for bar, val in zip(bars, vals):
+        ax.text(val + 0.01, bar.get_y() + bar.get_height()/2,
+                f'{val:.4f}', va='center', fontsize=8)
+
+plt.tight_layout()
+plt.show()
+
+# CELL 16
+fig, axes = plt.subplots(4, 3, figsize=(15, 18))
+fig.suptitle('Confusion Matrix SVR - Semua Dataset', fontsize=14, fontweight='bold')
+
+for ax, (name, res) in zip(axes.flatten(), results.items()):
+    sns.heatmap(
+        res['cm'], annot=True, fmt='d', cmap='Blues',
+        xticklabels=['Ditolak (0)', 'Disetujui (1)'],
+        yticklabels=['Ditolak (0)', 'Disetujui (1)'],
+        ax=ax
+    )
+    ax.set_title(name, fontsize=9, fontweight='bold')
+    ax.set_ylabel('Aktual')
+    ax.set_xlabel('Prediksi')
+
+plt.tight_layout()
+plt.show()
+
+# CELL 18
+for name, res in results.items():
+    print(f'{'='*55}')
+    print(f'  {name}')
+    print(f'{'='*55}')
+    print(classification_report(
+        res['y_test'], res['y_pred'],
+        target_names=['Ditolak (0)', 'Disetujui (1)'],
+        zero_division=0
+    ))
+    print()
+
+# CELL 20
+# ── Data baru (raw, belum ditransformasi) ──────────────────────────
+# Sesuaikan isi ini dengan data baru yang ingin diprediksi
+new_data_raw = {
+    'Gender'            : 1,      # 1=Male, 0=Female
+    'Married'           : 1,      # 1=Yes, 0=No
+    'Dependents'        : 3,    # 0, 1, 2, 3
+    'Education'         : 0,      # 1=Graduate, 0=Not Graduate
+    'Self_Employed'     : 0,      # 1=Yes, 0=No
+    'ApplicantIncome'   : 1000,
+    'CoapplicantIncome' : 1000,
+    'LoanAmount'        : 150,
+    'Loan_Amount_Term'  : 360,
+    'Credit_History'    : 0.0,
+    'Property_Area'     : 2,      # 1=Urban, 2=Rural, 3=Semiurban
+    'Total_Income'      : 2000,   # ApplicantIncome + CoapplicantIncome
+}
+
+new_df = pd.DataFrame([new_data_raw])
+print('Data baru yang akan diprediksi:')
+print(new_df.T)
+
+# CELL 21
+print('\n' + '='*55)
+print('  HASIL PREDIKSI DATA BARU - SEMUA MODEL')
+print('='*55)
+
+new_predictions = []
+
+for name, res in results.items():
+    model   = res['model']
+    cols    = res['columns']
+
+    # Pastikan kolom input sesuai urutan training
+    input_data = new_df[cols] if all(c in new_df.columns for c in cols) else None
+
+    if input_data is None:
+        print(f'{name:30s} : Kolom tidak lengkap, skip')
+        continue
+
+    pred_raw = model.predict(input_data)[0]
+    pred_label = 1 if pred_raw >= 0.5 else 0
+    status = 'DISETUJUI ✅' if pred_label == 1 else 'DITOLAK ❌'
+
+    print(f'{name:30s} : {status}  (raw={pred_raw:.4f})')
+    new_predictions.append({
+        'Dataset'    : name,
+        'Raw Score'  : round(pred_raw, 4),
+        'Prediksi'   : pred_label,
+        'Status'     : 'Disetujui' if pred_label == 1 else 'Ditolak'
+    })
+
+print('='*55)
+pred_df = pd.DataFrame(new_predictions)
+print(f"\nRingkasan: {(pred_df['Prediksi']==1).sum()} model prediksi DISETUJUI, "
+      f"{(pred_df['Prediksi']==0).sum()} model prediksi DITOLAK")
+
+# CELL 23
+print('RANGKUMAN PERFORMA MODEL (diurutkan F1 Score)')
+print('='*65)
+print(summary.to_string(index=False))
+
+best = summary.iloc[0]
+worst = summary.iloc[-1]
+
+print(f'\n🏆 Model TERBAIK  : {best["Dataset"]}')
+print(f'   F1={best["F1 Score"]:.4f} | Precision={best["Precision"]:.4f} | Recall={best["Recall"]:.4f} | Accuracy={best["Accuracy"]:.4f}')
+
+print(f'\n⚠️  Model TERENDAH : {worst["Dataset"]}')
+print(f'   F1={worst["F1 Score"]:.4f} | Precision={worst["Precision"]:.4f} | Recall={worst["Recall"]:.4f} | Accuracy={worst["Accuracy"]:.4f}')
+
